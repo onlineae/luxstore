@@ -130,18 +130,17 @@ app.post('/api/pix/create', async (req, res) => {
         metadata: {
           product_id: selectedProduct.id,
           product_name: selectedProduct.name,
-          product_size: selectedProduct.size,
-          tracking: tracking || {}
+          product_size: selectedProduct.size
         },
         expires_in: 3600, // 1 hora de validade
         utm: tracking ? {
-          utm_source: tracking.utm_source || '',
-          utm_medium: tracking.utm_medium || '',
-          utm_campaign: tracking.utm_campaign || '',
-          utm_content: tracking.utm_content || '',
-          utm_term: tracking.utm_term || '',
-          src: tracking.src || '',
-          sck: tracking.sck || ''
+          utm_source: String(tracking.utm_source || ''),
+          utm_medium: String(tracking.utm_medium || ''),
+          utm_campaign: String(tracking.utm_campaign || ''),
+          utm_content: String(tracking.utm_content || ''),
+          utm_term: String(tracking.utm_term || ''),
+          src: String(tracking.src || ''),
+          sck: String(tracking.sck || '')
         } : {}
       };
 
@@ -166,8 +165,31 @@ app.post('/api/pix/create', async (req, res) => {
         });
       }
 
-      const tx = await response.json();
-      console.log('[BravoPay] Transação criada com sucesso! ID:', tx.id);
+      let tx = await response.json();
+      console.log('[BravoPay] Transação criada com sucesso! ID:', tx.id, 'pix_status:', tx.pix_status || 'ready');
+
+      // Se a BravoPay respondeu com pix_status="generating", faz até 2 tentativas rápidas (4s) antes de devolver ao frontend
+      if ((!tx.pix || !tx.pix.copy_paste) && tx.id) {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          await new Promise(r => setTimeout(r, 2000));
+          try {
+            const pollRes = await fetch(`${BRAVOPAY_BASE_URL}/transactions/${encodeURIComponent(tx.id)}`, {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${BRAVOPAY_API_KEY.trim()}`,
+                'Content-Type': 'application/json'
+              }
+            });
+            if (pollRes.ok) {
+              const pollTx = await pollRes.json();
+              if (pollTx.pix && pollTx.pix.copy_paste) {
+                tx = pollTx;
+                break;
+              }
+            }
+          } catch (e) {}
+        }
+      }
 
       const copyPaste = (tx.pix && tx.pix.copy_paste) ? tx.pix.copy_paste : '';
       let qrCodeBase64 = '';
@@ -192,6 +214,7 @@ app.post('/api/pix/create', async (req, res) => {
 
       return res.json({
         id: tx.id,
+        pix_status: copyPaste ? 'ready' : (tx.pix_status || 'generating'),
         qr_code: copyPaste,
         qr_code_base64: qrCodeBase64,
         qr_code_url: (tx.pix && tx.pix.qr_code && tx.pix.qr_code.startsWith('http')) ? tx.pix.qr_code : null,
@@ -271,8 +294,24 @@ app.get('/api/pix/status', async (req, res) => {
         else if (rawStatus === 'REFUNDED') status = 'refunded';
         else if (rawStatus === 'CHARGEBACK') status = 'chargeback';
 
+        const copyPaste = (tx.pix && tx.pix.copy_paste) ? tx.pix.copy_paste : '';
+        let qrCodeBase64 = '';
+        if (tx.pix && tx.pix.qr_code && tx.pix.qr_code.startsWith('iVBOR')) {
+          qrCodeBase64 = tx.pix.qr_code;
+        } else if (copyPaste) {
+          const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
+          qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
+        }
+
         if (local) local.status = status;
-        return res.json({ status, raw: rawStatus });
+        return res.json({
+          status,
+          raw: rawStatus,
+          pix_status: copyPaste ? 'ready' : (tx.pix_status || 'generating'),
+          qr_code: copyPaste,
+          qr_code_base64: qrCodeBase64,
+          qr_code_url: (tx.pix && tx.pix.qr_code && tx.pix.qr_code.startsWith('http')) ? tx.pix.qr_code : null
+        });
       }
     } catch (err) {
       console.error('[BravoPay] Erro ao consultar transação:', err.message);

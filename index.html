@@ -329,11 +329,16 @@ footer{position:relative;z-index:2;text-align:center;padding:30px 20px 90px;colo
       <div class="err" id="err"></div>
     </div>
     <div class="pix" id="pixView">
-      <h3>✅ Pix gerado!</h3>
-      <p style="font-size:.85rem;color:#666">Escaneie o QR Code ou copie o código abaixo</p>
+      <h3 id="pixTitle">✅ Pix gerado!</h3>
+      <p style="font-size:.85rem;color:#666" id="pixSub">Escaneie o QR Code ou copie o código abaixo</p>
+      <div id="pixLoading" style="display:none;padding:22px 14px;margin:14px auto;background:#f4fbf7;border:1px dashed #1f9d55;border-radius:12px;color:#0f5c3a;font-size:.92rem;font-weight:600;line-height:1.45">
+        ⏳ Conectando ao banco para gerar seu QR Code Pix…<br>
+        <span style="font-size:.8rem;color:#555;font-weight:400">Aguarde alguns segundos, estamos finalizando a emissão do seu código.</span>
+      </div>
       <img id="qr" alt="QR Code Pix">
       <textarea id="code" readonly></textarea>
       <button class="cta" id="copy">COPIAR CÓDIGO PIX</button>
+      <button class="cta" id="retryPix" style="display:none;margin-top:10px;background:linear-gradient(180deg,#444,#222)">🔄 GERAR NOVO PIX</button>
       <p style="font-size:.8rem;color:#666;margin-top:10px" id="status">Aguardando pagamento…</p>
     </div>
   </div>
@@ -476,6 +481,39 @@ async function checkStatus(id){
   return r.json();
 }
 
+function renderPixReady(d){
+  $('pixTitle').textContent='✅ Pix gerado!';
+  $('pixSub').textContent='Escaneie o QR Code ou copie o código abaixo';
+  $('pixLoading').style.display='none';
+  $('qr').src=d.qr_code_base64?('data:image/png;base64,'+d.qr_code_base64):(d.qr_code_url||'');
+  $('qr').style.display='block';
+  $('code').value=d.qr_code||'';
+  $('code').style.display='block';
+  $('copy').style.display='block';
+  $('retryPix').style.display='none';
+  $('status').textContent='Aguardando pagamento…';
+}
+
+function renderPixGenerating(){
+  $('pixTitle').textContent='⏳ Gerando seu Pix…';
+  $('pixSub').textContent='Aguardando emissão do código pela operadora bancária';
+  $('pixLoading').innerHTML='⏳ Conectando ao banco para gerar seu QR Code Pix…<br><span style="font-size:.8rem;color:#555;font-weight:400">Aguarde alguns segundos, estamos finalizando a emissão do seu código.</span>';
+  $('pixLoading').style.display='block';
+  $('qr').style.display='none';
+  $('code').value='';
+  $('code').style.display='none';
+  $('copy').style.display='none';
+  $('retryPix').style.display='none';
+  $('status').textContent='Sincronizando código Pix com o Banco Central…';
+}
+
+$('retryPix').onclick=()=>{
+  stopPoll();
+  $('pixView').style.display='none';
+  $('formView').style.display='block';
+  $('pay').click();
+};
+
 $('pay').onclick=async()=>{
   $('err').style.display='none';
   const customer={
@@ -493,17 +531,28 @@ $('pay').onclick=async()=>{
   try{
     const d=await createPix(customer);
     orderId=d.id;
-    $('qr').src=d.qr_code_base64?('data:image/png;base64,'+d.qr_code_base64):(d.qr_code_url||'');
-    $('code').value=d.qr_code||'';
+    if(d.qr_code){
+      renderPixReady(d);
+    }else{
+      renderPixGenerating();
+    }
     $('formView').style.display='none';
     $('pixView').style.display='block';
 
     const prod = PRODUCTS[currentModel];
     if(window.fbq) fbq('track','AddPaymentInfo',{value:prod.price,currency:prod.currency,content_name:prod.name});
 
+    let pollCount=0;
     pollTimer=setInterval(async()=>{
       try{
+        pollCount++;
         const s=await checkStatus(orderId);
+        if(s.qr_code && !$('code').value){
+          renderPixReady(s);
+        }else if(!s.qr_code && !$('code').value && pollCount>=8){
+          $('pixLoading').innerHTML='⚠️ A operadora bancária do Pix está com lentidão neste instante.<br><span style="font-size:.8rem;color:#555;font-weight:400">Continuamos aguardando o código, ou clique abaixo para solicitar uma nova emissão.</span>';
+          $('retryPix').style.display='block';
+        }
         if(s.status==='paid'){
           stopPoll();
           $('status').innerHTML='🎉 <b style="color:#0f5c3a">Pagamento confirmado com sucesso!</b><br>Obrigado pela compra! Seus dados de rastreio serão enviados por e-mail e WhatsApp.';
