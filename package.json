@@ -1,0 +1,16 @@
+{
+  "name": "cortina-led-bravopay",
+  "version": "1.0.0",
+  "description": "Integração BravoPay Pix para Cortina LED de Natal (Modelos 3m e 5m)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "qrcode": "^1.5.4"
+  }
+}
