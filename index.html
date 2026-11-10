@@ -87,15 +87,23 @@ footer{position:relative;z-index:2;text-align:center;padding:30px 20px 90px;colo
 .sticky .cta{padding:12px 22px;font-size:.95rem;width:auto;animation:none}
 .sticky b{color:var(--gold);font-size:1.2rem}
 /* Modal checkout */
-.ov{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:100;display:none;align-items:center;justify-content:center;padding:16px}
 .ov.on{display:flex}
-.modal{background:#fff;color:#222;border-radius:18px;width:100%;max-width:440px;max-height:92vh;overflow:auto;padding:26px;position:relative}
-.modal h3{font-family:Poppins;font-size:1.25rem;margin-bottom:4px;color:var(--red2)}
-.modal .x{position:absolute;right:14px;top:10px;background:none;border:0;font-size:1.6rem;cursor:pointer}
-.modal label{display:block;font-size:.8rem;font-weight:600;margin:12px 0 4px}
-.modal input{width:100%;padding:12px;border:1px solid #ccc;border-radius:10px;font:1rem Poppins}
-.modal .sum{background:#f6f1ea;border-radius:10px;padding:12px;margin-top:14px;display:flex;justify-content:space-between;font-weight:600}
-.modal .cta{margin-top:16px;max-width:none;animation:none;background:linear-gradient(180deg,#1f9d55,#0f6b38);box-shadow:none}
+.modal{background:#fff;color:#222;border-radius:20px;width:100%;max-width:480px;max-height:92vh;overflow:auto;padding:24px 22px;position:relative;box-shadow:0 25px 60px rgba(0,0,0,.45)}
+.modal h3{font-family:Poppins;font-size:1.25rem;margin-bottom:2px;color:var(--red2)}
+.modal .step-title{font-size:.82rem;font-weight:700;color:#333;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+.modal .step-title span{background:#0f6b38;color:#fff;font-size:.68rem;padding:2px 6px;border-radius:6px}
+.modal .x{position:absolute;right:14px;top:12px;background:none;border:0;font-size:1.6rem;cursor:pointer;color:#888;transition:color .2s}
+.modal .x:hover{color:#000}
+.modal label{display:block;font-size:.76rem;font-weight:600;color:#555;margin:8px 0 3px}
+.modal input{width:100%;padding:10px 12px;border:1.5px solid #ded6cd;border-radius:8px;font:0.92rem Poppins;transition:border-color .2s,box-shadow .2s;background:#fff;color:#222}
+.modal input:focus{outline:none;border-color:#0f6b38;box-shadow:0 0 0 3px rgba(15,107,56,.12)}
+.modal .row-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.modal .row-cep{display:grid;grid-template-columns:130px 1fr;gap:10px}
+.modal .row-street{display:grid;grid-template-columns:1fr 90px;gap:10px}
+.modal .row-city{display:grid;grid-template-columns:1fr 75px;gap:10px}
+.modal .sum{background:#f8f5f0;border:1px solid #ebd7cb;border-radius:12px;padding:12px 14px;margin-top:16px;display:flex;justify-content:space-between;align-items:center}
+.modal .cta{margin-top:14px;max-width:none;animation:none;background:linear-gradient(180deg,#1f9d55,#0f6b38);box-shadow:0 4px 14px rgba(15,107,56,.35);font-size:1.02rem;padding:14px}
 .pix{text-align:center;display:none}
 .pix img{margin:12px auto;width:220px}
 .pix textarea{width:100%;height:80px;font-size:.75rem;padding:8px;border-radius:8px;border:1px solid #ccc}
@@ -286,9 +294,10 @@ footer{position:relative;z-index:2;text-align:center;padding:30px 20px 90px;colo
   <div class="modal">
     <button class="x" id="close" aria-label="Fechar">×</button>
     <div id="formView">
-      <h3>🎁 Finalizar pedido</h3>
-      <p style="font-size:.85rem;color:#666">Preencha para gerar seu Pix</p>
-            <label style="margin-top:14px;color:#333;font-weight:700">Escolha o seu modelo:</label>
+      <h3>🎁 Finalizar seu Pedido</h3>
+      <p style="font-size:.82rem;color:#666">Preencha seus dados para entrega e emissão do Pix</p>
+
+      <div class="step-title"><span>1</span> Escolha o modelo da sua cortina:</div>
       <div class="model-select-group">
         <div class="model-card active" data-model="3m" onclick="selectModel('3m')">
           <span class="model-badge">MAIS VENDIDO</span>
@@ -317,15 +326,57 @@ footer{position:relative;z-index:2;text-align:center;padding:30px 20px 90px;colo
         </div>
       </div>
 
+      <div class="step-title"><span>2</span> Seus dados de contato:</div>
       <label>Nome completo</label><input id="f_name" autocomplete="name" placeholder="Ex: Maria da Silva">
-      <label>E-mail</label><input id="f_email" type="email" autocomplete="email" placeholder="seuemail@exemplo.com">
-      <label>WhatsApp</label><input id="f_phone" inputmode="tel" placeholder="(21) 90000-0000" autocomplete="tel">
-      <label>CPF (para emissão do Pix)</label><input id="f_doc" inputmode="numeric" placeholder="000.000.000-00">
-      <div class="sum">
-        <span id="sumTitle">Cortina LED 3 Metros</span>
-        <span id="sumPrice">R$ 64,90</span>
+      <div class="row-2">
+        <div>
+          <label>E-mail</label><input id="f_email" type="email" autocomplete="email" placeholder="seuemail@exemplo.com">
+        </div>
+        <div>
+          <label>WhatsApp</label><input id="f_phone" inputmode="tel" placeholder="(21) 90000-0000" autocomplete="tel" maxlength="15">
+        </div>
       </div>
-      <button class="cta" id="pay">GERAR PIX</button>
+      <label>CPF (para emissão da Nota Fiscal e Pix)</label><input id="f_doc" inputmode="numeric" placeholder="000.000.000-00" maxlength="14">
+
+      <div class="step-title"><span>3</span> Endereço para entrega do produto:</div>
+      <div class="row-cep">
+        <div>
+          <label>CEP</label><input id="f_cep" inputmode="numeric" placeholder="00000-000" maxlength="9" autocomplete="postal-code">
+        </div>
+        <div>
+          <label>Bairro</label><input id="f_neighborhood" placeholder="Bairro" autocomplete="address-level3">
+        </div>
+      </div>
+      <div class="row-street">
+        <div>
+          <label>Rua / Logradouro</label><input id="f_street" placeholder="Rua, Avenida, Alameda..." autocomplete="street-address">
+        </div>
+        <div>
+          <label>Número</label><input id="f_number" placeholder="Ex: 123">
+        </div>
+      </div>
+      <div class="row-city">
+        <div>
+          <label>Complemento (opcional)</label><input id="f_complement" placeholder="Apto, Bloco, Casa 2...">
+        </div>
+        <div>
+          <label>UF</label><input id="f_state" placeholder="UF" maxlength="2" style="text-transform:uppercase;text-align:center">
+        </div>
+      </div>
+      <div>
+        <label>Cidade</label><input id="f_city" placeholder="Sua Cidade" autocomplete="address-level2">
+      </div>
+
+      <div class="sum">
+        <div>
+          <div id="sumTitle" style="font-weight:700;color:#12080a">Cortina LED 3 Metros</div>
+          <div style="font-size:.74rem;color:#0f6b38;font-weight:600;margin-top:2px">🚚 Envio Internacional Rastreado: <b>GRÁTIS</b></div>
+        </div>
+        <div id="sumPrice" style="font-size:1.35rem;font-weight:800;color:#8f0b20">R$ 64,90</div>
+      </div>
+
+      <button class="cta" id="pay">PAGAR COM PIX (APROVAÇÃO IMEDIATA)</button>
+      <div style="text-align:center;font-size:.72rem;color:#777;margin-top:8px">🔒 Pagamento 100% seguro processado pelo Banco Central</div>
       <div class="err" id="err"></div>
     </div>
     <div class="pix" id="pixView">
@@ -507,6 +558,58 @@ function renderPixGenerating(){
   $('status').textContent='Sincronizando código Pix com o Banco Central…';
 }
 
+// Máscara e busca automática de CEP (ViaCEP)
+const fCep = document.getElementById('f_cep');
+if (fCep) {
+  fCep.addEventListener('input', async (e) => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (v.length > 5) v = v.slice(0, 5) + '-' + v.slice(5, 8);
+    e.target.value = v;
+
+    const raw = v.replace(/\D/g, '');
+    if (raw.length === 8) {
+      try {
+        const prevText = fCep.placeholder;
+        fCep.placeholder = 'Buscando...';
+        const res = await fetch(`https://viacep.com.br/ws/${raw}/json/`);
+        const data = await res.json();
+        fCep.placeholder = prevText;
+        if (!data.erro) {
+          if (data.logradouro) $('f_street').value = data.logradouro;
+          if (data.bairro) $('f_neighborhood').value = data.bairro;
+          if (data.localidade) $('f_city').value = data.localidade;
+          if (data.uf) $('f_state').value = data.uf;
+          $('f_number').focus();
+        }
+      } catch (err) {}
+    }
+  });
+}
+
+// Máscara de CPF
+const fDoc = document.getElementById('f_doc');
+if (fDoc) {
+  fDoc.addEventListener('input', (e) => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (v.length > 9) v = v.slice(0,3) + '.' + v.slice(3,6) + '.' + v.slice(6,9) + '-' + v.slice(9,11);
+    else if (v.length > 6) v = v.slice(0,3) + '.' + v.slice(3,6) + '.' + v.slice(6);
+    else if (v.length > 3) v = v.slice(0,3) + '.' + v.slice(3);
+    e.target.value = v;
+  });
+}
+
+// Máscara de WhatsApp / Telefone
+const fPhone = document.getElementById('f_phone');
+if (fPhone) {
+  fPhone.addEventListener('input', (e) => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (v.length > 10) v = '(' + v.slice(0,2) + ') ' + v.slice(2,7) + '-' + v.slice(7,11);
+    else if (v.length > 6) v = '(' + v.slice(0,2) + ') ' + v.slice(2,6) + '-' + v.slice(6);
+    else if (v.length > 2) v = '(' + v.slice(0,2) + ') ' + v.slice(2);
+    e.target.value = v;
+  });
+}
+
 $('retryPix').onclick=()=>{
   stopPoll();
   $('pixView').style.display='none';
@@ -520,12 +623,23 @@ $('pay').onclick=async()=>{
     name:$('f_name').value.trim(),
     email:$('f_email').value.trim(),
     phone:$('f_phone').value.replace(/\D/g,''),
-    document:$('f_doc').value.replace(/\D/g,'')
+    document:$('f_doc').value.replace(/\D/g,''),
+    cep:$('f_cep') ? $('f_cep').value.replace(/\D/g,'') : '',
+    street:$('f_street') ? $('f_street').value.trim() : '',
+    number:$('f_number') ? $('f_number').value.trim() : '',
+    complement:$('f_complement') ? $('f_complement').value.trim() : '',
+    neighborhood:$('f_neighborhood') ? $('f_neighborhood').value.trim() : '',
+    city:$('f_city') ? $('f_city').value.trim() : '',
+    state:$('f_state') ? $('f_state').value.trim().toUpperCase() : ''
   };
   if(customer.name.split(' ').length<2) return showErr('Digite seu nome completo.');
   if(!/^\S+@\S+\.\S+$/.test(customer.email)) return showErr('Digite um e-mail válido.');
   if(customer.phone.length<10) return showErr('Digite seu WhatsApp com DDD.');
   if(customer.document.length!==11) return showErr('Digite um CPF válido (11 números).');
+  if(customer.cep.length!==8) return showErr('Digite um CEP válido com 8 números.');
+  if(!customer.street) return showErr('Digite a rua / logradouro de entrega.');
+  if(!customer.number) return showErr('Digite o número da sua residência (ou S/N).');
+  if(!customer.city) return showErr('Digite sua cidade de entrega.');
 
   const btn=$('pay');btn.disabled=true;btn.textContent='Gerando Pix…';
   try{
