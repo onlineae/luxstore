@@ -9,10 +9,13 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Credenciais oficiais da IronPay
-const DEFAULT_TOKEN = Buffer.from('MG1aYUkyNW5DNGE5SDU0ZG41WXhEbTRqMGlRSEFvZHN5elhLSGVjemdvMGE4VDE3WHU1ZWFsRkh4U0lz', 'base64').toString('utf8');
-const IRONPAY_API_TOKEN = (process.env.IRONPAY_API_TOKEN || DEFAULT_TOKEN).trim();
-const IRONPAY_BASE_URL = process.env.IRONPAY_BASE_URL || 'https://api.ironpayapp.com.br/api/public/v1';
+// Credenciais oficiais da SkalaPay (CajuPay Black ativa)
+const DEFAULT_CLIENT_ID = Buffer.from('Z2FicmllbF81bXI5Z3dmc2hkb2draXZnbG02Z2NteWw=', 'base64').toString('utf8');
+const DEFAULT_CLIENT_SECRET = Buffer.from('YlBES2xDN2V1QWxQOVZscU9wWFY5TDgySDlvZWNRMHB1SDN1azRzM1F0QUQ3R3c4alBFUjUwWG56Z2QwRGZPQw==', 'base64').toString('utf8');
+
+const SKALAPAY_CLIENT_ID = (process.env.SKALAPAY_CLIENT_ID || DEFAULT_CLIENT_ID).trim();
+const SKALAPAY_CLIENT_SECRET = (process.env.SKALAPAY_CLIENT_SECRET || DEFAULT_CLIENT_SECRET).trim();
+const SKALAPAY_BASE_URL = process.env.SKALAPAY_BASE_URL || 'https://skalapay.net/api';
 const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://luxstoreltda.onrender.com/api/pix/webhook';
 
 app.use(cors());
@@ -31,82 +34,77 @@ app.get('/', (req, res) => {
 // Cache em memória para transações locais e confirmação instantânea via Webhook
 const localTransactions = new Map();
 
-// Tabela de Preços, Modelos e Hashes oficiais da IronPay
+// Tabela de Preços e Modelos oficiais
 const CATALOG = {
   'cortina-led-3m': {
     id: 'cortina-led-3m',
     name: 'Cortina LED Inteligente de Natal - 3 Metros',
     price: 64.90,
     amount_cents: 6490,
-    size: '3m',
-    product_hash: 'ovmnikp7sj',
-    offer_hash: '8lij3'
+    size: '3m'
   },
   'cortina-led-5m': {
     id: 'cortina-led-5m',
     name: 'Cortina LED Inteligente de Natal - 5 Metros',
     price: 97.90,
     amount_cents: 9790,
-    size: '5m',
-    product_hash: 'ovmnikp7sj',
-    offer_hash: 'auwxp'
+    size: '5m'
   }
 };
 
 /**
- * Rota para verificar status de conexão com a IronPay
+ * Rota para verificar status de conexão com a SkalaPay
  */
 async function handleGatewayTest(req, res) {
-  if (!IRONPAY_API_TOKEN) {
+  if (!SKALAPAY_CLIENT_ID || !SKALAPAY_CLIENT_SECRET) {
     return res.json({
       connected: false,
-      gateway: 'ironpay',
+      gateway: 'skalapay',
       mode: 'mock',
-      message: 'IRONPAY_API_TOKEN não configurado.'
+      message: 'Credenciais da SkalaPay não configuradas.'
     });
   }
 
   try {
-    const response = await fetch(`${IRONPAY_BASE_URL}/products?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
+    // Consulta última transação de teste para verificar integridade da API
+    const response = await fetch(`${SKALAPAY_BASE_URL}/cash-in/4304`, {
       method: 'GET',
-      headers: { 'Accept': 'application/json' }
+      headers: {
+        'X-Client-Id': SKALAPAY_CLIENT_ID,
+        'X-Client-Secret': SKALAPAY_CLIENT_SECRET,
+        'Accept': 'application/json'
+      }
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      return res.status(response.status).json({
-        connected: false,
-        gateway: 'ironpay',
-        status: response.status,
-        error: err
-      });
-    }
+    const isConnected = response.ok;
+    const data = isConnected ? await response.json() : null;
 
-    const data = await response.json();
     return res.json({
-      connected: true,
-      gateway: 'ironpay',
+      connected: isConnected,
+      gateway: 'skalapay',
+      acquirer: 'CajuPay (Black) - Ativa e Funcional',
       mode: 'live',
-      products_count: Array.isArray(data.data) ? data.data.length : 1,
-      catalog: CATALOG
+      catalog: CATALOG,
+      api_status: response.status,
+      project: 'Lux Store'
     });
   } catch (err) {
     return res.status(500).json({
       connected: false,
-      gateway: 'ironpay',
+      gateway: 'skalapay',
       error: err.message
     });
   }
 }
 
-app.get('/api/ironpay/test', handleGatewayTest);
-app.get('/api/gateway/test', handleGatewayTest);
 app.get('/api/skalapay/test', handleGatewayTest);
+app.get('/api/gateway/test', handleGatewayTest);
 app.get('/api/sigilopay/test', handleGatewayTest);
+app.get('/api/ironpay/test', handleGatewayTest);
 app.get('/api/bravopay/test', handleGatewayTest);
 
 /**
- * Criação da cobrança PIX via IronPay
+ * Criação da cobrança PIX via SkalaPay (CajuPay Black)
  * Suporta o modelo de 3 metros (R$ 64,90) e o modelo de 5 metros (R$ 97,90)
  */
 app.post('/api/pix/create', async (req, res) => {
@@ -135,57 +133,33 @@ app.post('/api/pix/create', async (req, res) => {
 
     const fullAddress = `${cleanStreet}, ${cleanNumber}${cleanComp ? ' (' + cleanComp + ')' : ''} - ${cleanNeigh}, ${cleanCity}/${cleanState} - CEP: ${cleanCep}`;
 
-    if (IRONPAY_API_TOKEN) {
+    if (SKALAPAY_CLIENT_ID && SKALAPAY_CLIENT_SECRET) {
       const payload = {
-        amount: selectedProduct.amount_cents,
-        offer_hash: selectedProduct.offer_hash,
+        amount: Number(selectedProduct.price.toFixed(2)),
         payment_method: 'pix',
-        installments: 1,
-        customer: {
+        description: `${selectedProduct.name} - Lux Store`,
+        customer_data: {
           name: cleanName,
           email: cleanEmail,
-          phone_number: cleanPhone,
           document: cleanCpf,
-          street_name: cleanStreet,
+          phone: cleanPhone,
+          zip_code: cleanCep,
+          street: cleanStreet,
           number: cleanNumber,
-          complement: cleanComp || 'Casa',
+          complement: cleanComp,
           neighborhood: cleanNeigh,
           city: cleanCity,
-          state: cleanState,
-          zip_code: cleanCep
-        },
-        cart: [
-          {
-            product_hash: selectedProduct.product_hash,
-            title: selectedProduct.name,
-            cover: null,
-            price: selectedProduct.amount_cents,
-            quantity: 1,
-            operation_type: 1,
-            tangible: false
-          }
-        ],
-        expire_in_days: 1,
-        transaction_origin: 'api',
-        postback_url: WEBHOOK_URL
+          state: cleanState
+        }
       };
 
-      if (tracking && typeof tracking === 'object') {
-        payload.tracking = {
-          src: String(tracking.src || ''),
-          utm_source: String(tracking.utm_source || ''),
-          utm_medium: String(tracking.utm_medium || ''),
-          utm_campaign: String(tracking.utm_campaign || ''),
-          utm_term: String(tracking.utm_term || ''),
-          utm_content: String(tracking.utm_content || '')
-        };
-      }
+      console.log(`[SkalaPay] Criando Pix para ${selectedProduct.name} - R$ ${selectedProduct.price.toFixed(2)}...`);
 
-      console.log(`[IronPay] Criando Pix para ${selectedProduct.name} (${selectedProduct.offer_hash}) - R$ ${selectedProduct.price.toFixed(2)}...`);
-
-      const response = await fetch(`${IRONPAY_BASE_URL}/transactions?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
+      const response = await fetch(`${SKALAPAY_BASE_URL}/cash-in`, {
         method: 'POST',
         headers: {
+          'X-Client-Id': SKALAPAY_CLIENT_ID,
+          'X-Client-Secret': SKALAPAY_CLIENT_SECRET,
           'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
@@ -194,58 +168,45 @@ app.post('/api/pix/create', async (req, res) => {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        console.error('[IronPay] Erro ao criar transação:', response.status, errorBody);
+        console.error('[SkalaPay] Erro ao criar transação:', response.status, errorBody);
+
+        let parsedError;
+        try { parsedError = JSON.parse(errorBody); } catch (e) {}
+
+        const userMsg = (parsedError && parsedError.message) 
+          ? parsedError.message 
+          : 'Falha ao comunicar com o gateway de pagamento. Tente novamente.';
+
         return res.status(response.status).json({
-          error: 'Falha ao gerar o Pix junto ao gateway IronPay.',
+          error: userMsg,
           details: errorBody
         });
       }
 
-      let tx = await response.json();
-      const txData = tx.data || tx;
-      const txHash = txData.hash || String(txData.id || '');
-      let pixObj = txData.pix || {};
-      let copyPaste = pixObj.pix_qr_code || pixObj.pix_url || pixObj.copy_paste || '';
+      const data = await response.json();
+      console.log('[SkalaPay] Transação criada com sucesso! ID:', (data.transaction && data.transaction.id));
 
-      console.log('[IronPay] Transação criada com sucesso! Hash:', txHash, 'Status:', txData.payment_status);
+      const tx = data.transaction || data;
+      const txId = String(tx.id || data.id || tx.order_id || '');
+      const orderId = String(tx.order_id || tx.external_id || txId);
 
-      // Caso o código Pix demore alguns segundos para ficar pronto, faz até 2 consultas rápidas
-      if (!copyPaste && txHash) {
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          await new Promise(r => setTimeout(r, 1500));
-          try {
-            const pollRes = await fetch(`${IRONPAY_BASE_URL}/transactions/${encodeURIComponent(txHash)}?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
-              method: 'GET',
-              headers: { 'Accept': 'application/json' }
-            });
-            if (pollRes.ok) {
-              const pollTx = await pollRes.json();
-              const pData = pollTx.data || pollTx;
-              const pPix = pData.pix || {};
-              const pCode = pPix.pix_qr_code || pPix.pix_url || pPix.copy_paste || '';
-              if (pCode) {
-                copyPaste = pCode;
-                pixObj = pPix;
-                break;
-              }
-            }
-          } catch (e) {}
-        }
-      }
+      const copyPaste = tx.qr_code || 
+                        tx.pix_copy_paste || 
+                        (tx.acquirer_response && (tx.acquirer_response.copy_paste || tx.acquirer_response.qr_code)) || 
+                        data.qr_code || 
+                        '';
 
       let qrCodeBase64 = '';
-      if (pixObj.qr_code_base64 && String(pixObj.qr_code_base64).startsWith('iVBOR')) {
-        qrCodeBase64 = pixObj.qr_code_base64;
-      } else if (copyPaste) {
+      if (copyPaste) {
         const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
         qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
       }
 
       const txRecord = {
-        id: txHash,
+        id: txId,
+        order_id: orderId,
         status: 'pending',
         amount: selectedProduct.price,
-        amount_cents: selectedProduct.amount_cents,
         product: selectedProduct,
         customer: {
           name: cleanName,
@@ -264,10 +225,17 @@ app.post('/api/pix/create', async (req, res) => {
         createdAt: Date.now()
       };
 
-      localTransactions.set(txHash, txRecord);
+      console.log(`📦 [NOVO PEDIDO RECEBIDO] ID: ${txId} | Cliente: ${cleanName} | WhatsApp: ${cleanPhone}`);
+      console.log(`   Endereço de Entrega: ${fullAddress}`);
+
+      localTransactions.set(txId, txRecord);
+      if (orderId && orderId !== txId) {
+        localTransactions.set(orderId, txRecord);
+      }
 
       return res.json({
-        id: txHash,
+        id: txId,
+        order_id: orderId,
         pix_status: copyPaste ? 'ready' : 'generating',
         qr_code: copyPaste,
         qr_code_base64: qrCodeBase64,
@@ -277,7 +245,7 @@ app.post('/api/pix/create', async (req, res) => {
       });
     }
 
-    // Modo de Simulação / Fallback local
+    // Modo de Simulação / Fallback
     const mockId = 'tx_mock_' + crypto.randomBytes(8).toString('hex');
     const mockCopyPaste = `00020126580014br.gov.bcb.pix0136${crypto.randomUUID()}520400005303986540${(selectedProduct.price).toFixed(2).replace('.', '')}5802BR5915CORTINA LED BR6009SAO PAULO62070503***6304MOCK`;
     const qrDataUrl = await QRCode.toDataURL(mockCopyPaste, { width: 300, margin: 2 });
@@ -287,7 +255,6 @@ app.post('/api/pix/create', async (req, res) => {
       id: mockId,
       status: 'pending',
       amount: selectedProduct.price,
-      amount_cents: selectedProduct.amount_cents,
       product: selectedProduct,
       customer,
       createdAt: Date.now()
@@ -310,15 +277,15 @@ app.post('/api/pix/create', async (req, res) => {
 });
 
 /**
- * Consulta de status do pagamento na IronPay
+ * Consulta de status do pagamento na SkalaPay
  */
 app.get('/api/pix/status', async (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'ID da transação não fornecido.' });
 
-  const local = localTransactions.get(id);
+  const local = localTransactions.get(String(id));
   if (local && local.status === 'paid') {
-    return res.json({ status: 'paid', raw: 'paid', pix_status: 'ready' });
+    return res.json({ status: 'paid', raw: 'PAID', pix_status: 'ready' });
   }
 
   if (id.startsWith('tx_mock_')) {
@@ -328,35 +295,34 @@ app.get('/api/pix/status', async (req, res) => {
     return res.json({ status: local ? local.status : 'pending' });
   }
 
-  if (IRONPAY_API_TOKEN) {
+  if (SKALAPAY_CLIENT_ID && SKALAPAY_CLIENT_SECRET) {
     try {
-      const response = await fetch(`${IRONPAY_BASE_URL}/transactions/${encodeURIComponent(id)}?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
+      const response = await fetch(`${SKALAPAY_BASE_URL}/cash-in/${encodeURIComponent(id)}`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' }
+        headers: {
+          'X-Client-Id': SKALAPAY_CLIENT_ID,
+          'X-Client-Secret': SKALAPAY_CLIENT_SECRET,
+          'Accept': 'application/json'
+        }
       });
 
       if (response.ok) {
-        const tx = await response.json();
-        const txData = tx.data || tx;
-        const rawStatus = String(txData.payment_status || txData.status || '').toLowerCase();
+        const json = await response.json();
+        const tx = (json.data && json.data.transaction) || json.transaction || json.data || json;
+        const rawStatus = String(tx.status || '').toUpperCase();
         let status = 'pending';
 
-        if (['paid', 'approved', 'pad_approved'].includes(rawStatus)) {
+        if (rawStatus === 'PAID' || tx.is_paid === true) {
           status = 'paid';
-        } else if (['expired', 'refused', 'cancelled', 'canceled', 'unpaid', 'failed'].includes(rawStatus)) {
+        } else if (rawStatus === 'CANCELLED' || rawStatus === 'FAILED' || rawStatus === 'EXPIRED') {
           status = 'expired';
-        } else if (rawStatus === 'refunded') {
+        } else if (rawStatus === 'REFUNDED') {
           status = 'refunded';
-        } else if (rawStatus === 'chargeback') {
-          status = 'chargeback';
         }
 
-        const pixObj = txData.pix || {};
-        const copyPaste = pixObj.pix_qr_code || pixObj.pix_url || pixObj.copy_paste || '';
+        const copyPaste = tx.qr_code || tx.pix_copy_paste || '';
         let qrCodeBase64 = '';
-        if (pixObj.qr_code_base64 && String(pixObj.qr_code_base64).startsWith('iVBOR')) {
-          qrCodeBase64 = pixObj.qr_code_base64;
-        } else if (copyPaste) {
+        if (copyPaste) {
           const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
           qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
         }
@@ -367,12 +333,11 @@ app.get('/api/pix/status', async (req, res) => {
           raw: rawStatus,
           pix_status: copyPaste ? 'ready' : 'generating',
           qr_code: copyPaste,
-          qr_code_base64: qrCodeBase64,
-          qr_code_url: null
+          qr_code_base64: qrCodeBase64
         });
       }
     } catch (err) {
-      console.error('[IronPay] Erro ao consultar transação:', err.message);
+      console.error('[SkalaPay] Erro ao consultar transação:', err.message);
     }
   }
 
@@ -380,39 +345,40 @@ app.get('/api/pix/status', async (req, res) => {
 });
 
 /**
- * Webhook IronPay
+ * Webhook SkalaPay
  * Recebe notificações instantâneas de pagamento confirmado
  */
 app.post('/api/pix/webhook', (req, res) => {
   try {
     const payload = req.body || {};
-    console.log('[IronPay Webhook] Recebido:', JSON.stringify(payload, null, 2));
+    console.log('[SkalaPay Webhook] Recebido:', JSON.stringify(payload, null, 2));
 
-    const txHash = payload.hash || payload.transaction_hash || (payload.data && payload.data.hash) || String(payload.id || '');
-    const rawStatus = String(
-      payload.payment_status ||
-      payload.status ||
-      (payload.data && (payload.data.payment_status || payload.data.status)) ||
-      ''
-    ).toLowerCase();
+    const txId = payload.transaction_id || payload.id || (payload.transaction && payload.transaction.id);
+    const orderId = payload.order_id || (payload.transaction && payload.transaction.order_id);
+    const rawStatus = String(payload.status || (payload.transaction && payload.transaction.status) || payload.event || '').toLowerCase();
 
-    if (txHash && rawStatus) {
-      const local = localTransactions.get(txHash);
+    const isPaid = rawStatus.includes('paid') || rawStatus.includes('confirmed') || rawStatus === 'pago';
+    const isCancelled = rawStatus.includes('cancel') || rawStatus.includes('fail') || rawStatus.includes('expired');
+
+    if (txId) {
+      const local = localTransactions.get(String(txId));
       if (local) {
-        if (['paid', 'approved', 'pad_approved'].includes(rawStatus)) local.status = 'paid';
-        else if (['expired', 'refused', 'cancelled', 'canceled', 'unpaid', 'failed'].includes(rawStatus)) local.status = 'expired';
-      } else {
-        localTransactions.set(txHash, {
-          id: txHash,
-          status: ['paid', 'approved', 'pad_approved'].includes(rawStatus) ? 'paid' : 'pending',
-          createdAt: Date.now()
-        });
+        if (isPaid) local.status = 'paid';
+        if (isCancelled) local.status = 'expired';
+      }
+    }
+
+    if (orderId) {
+      const local = localTransactions.get(String(orderId));
+      if (local) {
+        if (isPaid) local.status = 'paid';
+        if (isCancelled) local.status = 'expired';
       }
     }
 
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error('Erro no webhook IronPay:', err);
+    console.error('Erro no webhook SkalaPay:', err);
     return res.status(500).json({ error: 'Erro ao processar webhook' });
   }
 });
@@ -533,8 +499,8 @@ app.get('/pedidos', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\n======================================================`);
-  console.log(`🚀 Servidor Cortina LED + IronPay Pix rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor Cortina LED + SkalaPay Pix rodando na porta ${PORT}`);
   console.log(`🌐 Acesse no seu navegador: http://localhost:${PORT}`);
-  console.log(`✅ CONEXÃO COM IRONPAY ATIVA!`);
+  console.log(`✅ CONEXÃO COM SKALAPAY (CAJUPAY BLACK) ATIVA!`);
   console.log(`======================================================\n`);
 });
