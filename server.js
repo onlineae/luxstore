@@ -9,13 +9,13 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Credenciais oficiais da SigiloPay
-const DEFAULT_PUB = Buffer.from('cGVsaWFzbGltYV92cG9sZ2xzeGV3N256OHZq', 'base64').toString('utf8');
-const DEFAULT_SEC = Buffer.from('aG4xZnh3MDIwbTZ3c25iaTZ2Ym41aWt4M2kya2JiaWk2ZTllMmVoNjY3a3IyOG0zd210cW45b3AzMzFleG5qNw==', 'base64').toString('utf8');
+// Credenciais oficiais da SkalaPay (CajuPay Black ativa)
+const DEFAULT_CLIENT_ID = Buffer.from('Z2FicmllbF81bXI5Z3dmc2hkb2draXZnbG02Z2NteWw=', 'base64').toString('utf8');
+const DEFAULT_CLIENT_SECRET = Buffer.from('YlBES2xDN2V1QWxQOVZscU9wWFY5TDgySDlvZWNRMHB1SDN1azRzM1F0QUQ3R3c4alBFUjUwWG56Z2QwRGZPQw==', 'base64').toString('utf8');
 
-const SIGILOPAY_PUBLIC_KEY = (process.env.SIGILOPAY_PUBLIC_KEY || DEFAULT_PUB).trim();
-const SIGILOPAY_SECRET_KEY = (process.env.SIGILOPAY_SECRET_KEY || DEFAULT_SEC).trim();
-const SIGILOPAY_BASE_URL = process.env.SIGILOPAY_BASE_URL || 'https://app.sigilopay.com.br/api/v1';
+const SKALAPAY_CLIENT_ID = (process.env.SKALAPAY_CLIENT_ID || DEFAULT_CLIENT_ID).trim();
+const SKALAPAY_CLIENT_SECRET = (process.env.SKALAPAY_CLIENT_SECRET || DEFAULT_CLIENT_SECRET).trim();
+const SKALAPAY_BASE_URL = process.env.SKALAPAY_BASE_URL || 'https://skalapay.net/api';
 const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://luxstoreltda.onrender.com/api/pix/webhook';
 
 app.use(cors());
@@ -41,76 +41,70 @@ const CATALOG = {
     name: 'Cortina LED Inteligente de Natal - 3 Metros',
     price: 64.90,
     amount_cents: 6490,
-    size: '3m',
-    sigilo_id: 'cmwa1bj6q12wz01pzbi4atzcz'
+    size: '3m'
   },
   'cortina-led-5m': {
     id: 'cortina-led-5m',
     name: 'Cortina LED Inteligente de Natal - 5 Metros',
     price: 97.90,
     amount_cents: 9790,
-    size: '5m',
-    sigilo_id: 'cmwa1bj6q12wz01pzbi4atzcz'
+    size: '5m'
   }
 };
 
 /**
- * Rota para verificar status de conexão com a SigiloPay
+ * Rota para verificar status de conexão com a SkalaPay
  */
 async function handleGatewayTest(req, res) {
-  if (!SIGILOPAY_PUBLIC_KEY || !SIGILOPAY_SECRET_KEY) {
+  if (!SKALAPAY_CLIENT_ID || !SKALAPAY_CLIENT_SECRET) {
     return res.json({
       connected: false,
-      gateway: 'sigilopay',
+      gateway: 'skalapay',
       mode: 'mock',
-      message: 'Credenciais da SigiloPay não configuradas.'
+      message: 'Credenciais da SkalaPay não configuradas.'
     });
   }
 
   try {
-    const response = await fetch(`${SIGILOPAY_BASE_URL}/gateway/producer/credentials`, {
+    // Consulta última transação de teste para verificar integridade da API
+    const response = await fetch(`${SKALAPAY_BASE_URL}/cash-in/4304`, {
       method: 'GET',
       headers: {
-        'x-public-key': SIGILOPAY_PUBLIC_KEY,
-        'x-secret-key': SIGILOPAY_SECRET_KEY,
-        'Content-Type': 'application/json'
+        'X-Client-Id': SKALAPAY_CLIENT_ID,
+        'X-Client-Secret': SKALAPAY_CLIENT_SECRET,
+        'Accept': 'application/json'
       }
     });
 
-    if (!response.ok) {
-      const err = await response.text();
-      return res.status(response.status).json({
-        connected: false,
-        gateway: 'sigilopay',
-        status: response.status,
-        error: err
-      });
-    }
+    const isConnected = response.ok;
+    const data = isConnected ? await response.json() : null;
 
-    const data = await response.json();
     return res.json({
-      connected: true,
-      gateway: 'sigilopay',
+      connected: isConnected,
+      gateway: 'skalapay',
+      acquirer: 'CajuPay (Black) - Ativa e Funcional',
       mode: 'live',
-      account: data,
-      catalog: CATALOG
+      catalog: CATALOG,
+      api_status: response.status,
+      project: 'Lux Store'
     });
   } catch (err) {
     return res.status(500).json({
       connected: false,
-      gateway: 'sigilopay',
+      gateway: 'skalapay',
       error: err.message
     });
   }
 }
 
-app.get('/api/sigilopay/test', handleGatewayTest);
+app.get('/api/skalapay/test', handleGatewayTest);
 app.get('/api/gateway/test', handleGatewayTest);
+app.get('/api/sigilopay/test', handleGatewayTest);
 app.get('/api/ironpay/test', handleGatewayTest);
 app.get('/api/bravopay/test', handleGatewayTest);
 
 /**
- * Criação da cobrança PIX via SigiloPay
+ * Criação da cobrança PIX via SkalaPay (CajuPay Black)
  * Suporta o modelo de 3 metros (R$ 64,90) e o modelo de 5 metros (R$ 97,90)
  */
 app.post('/api/pix/create', async (req, res) => {
@@ -130,50 +124,42 @@ app.post('/api/pix/create', async (req, res) => {
     const cleanName = (customer.name || '').trim();
     const cleanEmail = (customer.email || '').trim().toLowerCase();
 
-    if (SIGILOPAY_PUBLIC_KEY && SIGILOPAY_SECRET_KEY) {
-      const orderIdentifier = `lux_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (SKALAPAY_CLIENT_ID && SKALAPAY_CLIENT_SECRET) {
       const payload = {
-        identifier: orderIdentifier,
         amount: Number(selectedProduct.price.toFixed(2)),
-        client: {
+        payment_method: 'pix',
+        description: `${selectedProduct.name} - Lux Store`,
+        customer_data: {
           name: cleanName,
           email: cleanEmail,
-          phone: cleanPhone,
-          document: cleanCpf
-        },
-        products: [
-          {
-            id: selectedProduct.sigilo_id || 'cmwa1bj6q12wz01pzbi4atzcz',
-            name: selectedProduct.name,
-            quantity: 1,
-            price: Number(selectedProduct.price.toFixed(2))
-          }
-        ],
-        callbackUrl: WEBHOOK_URL
+          document: cleanCpf,
+          phone: cleanPhone
+        }
       };
 
-      console.log(`[SigiloPay] Criando Pix para ${selectedProduct.name} - R$ ${selectedProduct.price.toFixed(2)}...`);
+      console.log(`[SkalaPay] Criando Pix para ${selectedProduct.name} - R$ ${selectedProduct.price.toFixed(2)}...`);
 
-      const response = await fetch(`${SIGILOPAY_BASE_URL}/gateway/pix/receive`, {
+      const response = await fetch(`${SKALAPAY_BASE_URL}/cash-in`, {
         method: 'POST',
         headers: {
-          'x-public-key': SIGILOPAY_PUBLIC_KEY,
-          'x-secret-key': SIGILOPAY_SECRET_KEY,
-          'Content-Type': 'application/json'
+          'X-Client-Id': SKALAPAY_CLIENT_ID,
+          'X-Client-Secret': SKALAPAY_CLIENT_SECRET,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
         },
         body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
         const errorBody = await response.text();
-        console.error('[SigiloPay] Erro ao criar transação:', response.status, errorBody);
+        console.error('[SkalaPay] Erro ao criar transação:', response.status, errorBody);
 
         let parsedError;
         try { parsedError = JSON.parse(errorBody); } catch (e) {}
 
         const userMsg = (parsedError && parsedError.message) 
           ? parsedError.message 
-          : 'Sistema de pagamentos em manutenção temporária. Tente novamente em instantes.';
+          : 'Falha ao comunicar com o gateway de pagamento. Tente novamente.';
 
         return res.status(response.status).json({
           error: userMsg,
@@ -182,35 +168,46 @@ app.post('/api/pix/create', async (req, res) => {
       }
 
       const data = await response.json();
-      console.log('[SigiloPay] Transação criada com sucesso!', JSON.stringify(data));
+      console.log('[SkalaPay] Transação criada com sucesso! ID:', (data.transaction && data.transaction.id));
 
-      const txId = data.transactionId || (data.order && data.order.id) || orderIdentifier;
-      const pixObj = data.pix || {};
-      const copyPaste = pixObj.code || pixObj.qr_code || '';
-      let qrCodeBase64 = pixObj.base64 || '';
-      const qrCodeUrl = pixObj.image || pixObj.url || null;
+      const tx = data.transaction || data;
+      const txId = String(tx.id || data.id || tx.order_id || '');
+      const orderId = String(tx.order_id || tx.external_id || txId);
 
-      if (!qrCodeBase64 && copyPaste) {
+      const copyPaste = tx.qr_code || 
+                        tx.pix_copy_paste || 
+                        (tx.acquirer_response && (tx.acquirer_response.copy_paste || tx.acquirer_response.qr_code)) || 
+                        data.qr_code || 
+                        '';
+
+      let qrCodeBase64 = '';
+      if (copyPaste) {
         const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
         qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
       }
 
-      localTransactions.set(txId, {
+      const txRecord = {
         id: txId,
-        identifier: orderIdentifier,
+        order_id: orderId,
         status: 'pending',
         amount: selectedProduct.price,
         product: selectedProduct,
         customer,
         createdAt: Date.now()
-      });
+      };
+
+      localTransactions.set(txId, txRecord);
+      if (orderId && orderId !== txId) {
+        localTransactions.set(orderId, txRecord);
+      }
 
       return res.json({
         id: txId,
+        order_id: orderId,
         pix_status: copyPaste ? 'ready' : 'generating',
         qr_code: copyPaste,
         qr_code_base64: qrCodeBase64,
-        qr_code_url: qrCodeUrl,
+        qr_code_url: null,
         amount: selectedProduct.price,
         product: selectedProduct
       });
@@ -248,15 +245,15 @@ app.post('/api/pix/create', async (req, res) => {
 });
 
 /**
- * Consulta de status do pagamento na SigiloPay
+ * Consulta de status do pagamento na SkalaPay
  */
 app.get('/api/pix/status', async (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'ID da transação não fornecido.' });
 
-  const local = localTransactions.get(id);
+  const local = localTransactions.get(String(id));
   if (local && local.status === 'paid') {
-    return res.json({ status: 'paid', raw: 'COMPLETED', pix_status: 'ready' });
+    return res.json({ status: 'paid', raw: 'PAID', pix_status: 'ready' });
   }
 
   if (id.startsWith('tx_mock_')) {
@@ -266,34 +263,34 @@ app.get('/api/pix/status', async (req, res) => {
     return res.json({ status: local ? local.status : 'pending' });
   }
 
-  if (SIGILOPAY_PUBLIC_KEY && SIGILOPAY_SECRET_KEY) {
+  if (SKALAPAY_CLIENT_ID && SKALAPAY_CLIENT_SECRET) {
     try {
-      const response = await fetch(`${SIGILOPAY_BASE_URL}/gateway/transactions?id=${encodeURIComponent(id)}`, {
+      const response = await fetch(`${SKALAPAY_BASE_URL}/cash-in/${encodeURIComponent(id)}`, {
         method: 'GET',
         headers: {
-          'x-public-key': SIGILOPAY_PUBLIC_KEY,
-          'x-secret-key': SIGILOPAY_SECRET_KEY,
-          'Content-Type': 'application/json'
+          'X-Client-Id': SKALAPAY_CLIENT_ID,
+          'X-Client-Secret': SKALAPAY_CLIENT_SECRET,
+          'Accept': 'application/json'
         }
       });
 
       if (response.ok) {
-        const tx = await response.json();
+        const json = await response.json();
+        const tx = (json.data && json.data.transaction) || json.transaction || json.data || json;
         const rawStatus = String(tx.status || '').toUpperCase();
         let status = 'pending';
 
-        if (rawStatus === 'COMPLETED' || rawStatus === 'PAID') {
+        if (rawStatus === 'PAID' || tx.is_paid === true) {
           status = 'paid';
-        } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELED' || rawStatus === 'CANCELLED') {
+        } else if (rawStatus === 'CANCELLED' || rawStatus === 'FAILED' || rawStatus === 'EXPIRED') {
           status = 'expired';
         } else if (rawStatus === 'REFUNDED') {
           status = 'refunded';
         }
 
-        const pixInfo = tx.pixInformation || tx.pix || {};
-        const copyPaste = pixInfo.qrCode || pixInfo.code || '';
-        let qrCodeBase64 = pixInfo.base64 || '';
-        if (!qrCodeBase64 && copyPaste) {
+        const copyPaste = tx.qr_code || tx.pix_copy_paste || '';
+        let qrCodeBase64 = '';
+        if (copyPaste) {
           const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
           qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
         }
@@ -308,7 +305,7 @@ app.get('/api/pix/status', async (req, res) => {
         });
       }
     } catch (err) {
-      console.error('[SigiloPay] Erro ao consultar transação:', err.message);
+      console.error('[SkalaPay] Erro ao consultar transação:', err.message);
     }
   }
 
@@ -316,47 +313,48 @@ app.get('/api/pix/status', async (req, res) => {
 });
 
 /**
- * Webhook SigiloPay
+ * Webhook SkalaPay
  * Recebe notificações instantâneas de pagamento confirmado
  */
 app.post('/api/pix/webhook', (req, res) => {
   try {
     const payload = req.body || {};
-    console.log('[SigiloPay Webhook] Recebido:', JSON.stringify(payload, null, 2));
+    console.log('[SkalaPay Webhook] Recebido:', JSON.stringify(payload, null, 2));
 
-    const event = String(payload.event || '').toUpperCase();
-    const tx = payload.transaction || {};
-    const txId = tx.id || payload.id;
-    const rawStatus = String(tx.status || payload.status || '').toUpperCase();
+    const txId = payload.transaction_id || payload.id || (payload.transaction && payload.transaction.id);
+    const orderId = payload.order_id || (payload.transaction && payload.transaction.order_id);
+    const rawStatus = String(payload.status || (payload.transaction && payload.transaction.status) || payload.event || '').toLowerCase();
+
+    const isPaid = rawStatus.includes('paid') || rawStatus.includes('confirmed') || rawStatus === 'pago';
+    const isCancelled = rawStatus.includes('cancel') || rawStatus.includes('fail') || rawStatus.includes('expired');
 
     if (txId) {
-      const local = localTransactions.get(txId);
-      const isPaid = event === 'TRANSACTION_PAID' || rawStatus === 'COMPLETED' || rawStatus === 'PAID';
-      const isCanceled = event === 'TRANSACTION_CANCELED' || rawStatus === 'FAILED';
-
+      const local = localTransactions.get(String(txId));
       if (local) {
         if (isPaid) local.status = 'paid';
-        if (isCanceled) local.status = 'expired';
-      } else {
-        localTransactions.set(txId, {
-          id: txId,
-          status: isPaid ? 'paid' : 'pending',
-          createdAt: Date.now()
-        });
+        if (isCancelled) local.status = 'expired';
+      }
+    }
+
+    if (orderId) {
+      const local = localTransactions.get(String(orderId));
+      if (local) {
+        if (isPaid) local.status = 'paid';
+        if (isCancelled) local.status = 'expired';
       }
     }
 
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error('Erro no webhook SigiloPay:', err);
+    console.error('Erro no webhook SkalaPay:', err);
     return res.status(500).json({ error: 'Erro ao processar webhook' });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`\n======================================================`);
-  console.log(`🚀 Servidor Cortina LED + SigiloPay Pix rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor Cortina LED + SkalaPay Pix rodando na porta ${PORT}`);
   console.log(`🌐 Acesse no seu navegador: http://localhost:${PORT}`);
-  console.log(`✅ CONEXÃO COM SIGILOPAY ATIVA!`);
+  console.log(`✅ CONEXÃO COM SKALAPAY (CAJUPAY BLACK) ATIVA!`);
   console.log(`======================================================\n`);
 });
