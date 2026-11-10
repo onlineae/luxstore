@@ -8,9 +8,14 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const DEFAULT_TOKEN = Buffer.from('MG1aYUkyNW5DNGE5SDU0ZG41WXhEbTRqMGlRSEFvZHN5elhLSGVjemdvMGE4VDE3WHU1ZWFsRkh4U0lz', 'base64').toString('utf8');
-const IRONPAY_API_TOKEN = (process.env.IRONPAY_API_TOKEN || DEFAULT_TOKEN).trim();
-const IRONPAY_BASE_URL = process.env.IRONPAY_BASE_URL || 'https://api.ironpayapp.com.br/api/public/v1';
+
+// Credenciais oficiais da SigiloPay
+const DEFAULT_PUB = Buffer.from('cGVsaWFzbGltYV92cG9sZ2xzeGV3N256OHZq', 'base64').toString('utf8');
+const DEFAULT_SEC = Buffer.from('aG4xZnh3MDIwbTZ3c25iaTZ2Ym41aWt4M2kya2JiaWk2ZTllMmVoNjY3a3IyOG0zd210cW45b3AzMzFleG5qNw==', 'base64').toString('utf8');
+
+const SIGILOPAY_PUBLIC_KEY = (process.env.SIGILOPAY_PUBLIC_KEY || DEFAULT_PUB).trim();
+const SIGILOPAY_SECRET_KEY = (process.env.SIGILOPAY_SECRET_KEY || DEFAULT_SEC).trim();
+const SIGILOPAY_BASE_URL = process.env.SIGILOPAY_BASE_URL || 'https://app.sigilopay.com.br/api/v1';
 const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://luxstoreltda.onrender.com/api/pix/webhook';
 
 app.use(cors());
@@ -29,7 +34,7 @@ app.get('/', (req, res) => {
 // Cache em memória para transações locais e confirmação instantânea via Webhook
 const localTransactions = new Map();
 
-// Tabela de Preços, Modelos e Hashes oficiais da IronPay
+// Tabela de Preços e Modelos oficiais
 const CATALOG = {
   'cortina-led-3m': {
     id: 'cortina-led-3m',
@@ -37,8 +42,7 @@ const CATALOG = {
     price: 64.90,
     amount_cents: 6490,
     size: '3m',
-    product_hash: 'ovmnikp7sj',
-    offer_hash: '8lij3'
+    sigilo_id: 'cmwa1bj6q12wz01pzbi4atzcz'
   },
   'cortina-led-5m': {
     id: 'cortina-led-5m',
@@ -46,35 +50,38 @@ const CATALOG = {
     price: 97.90,
     amount_cents: 9790,
     size: '5m',
-    product_hash: 'ovmnikp7sj',
-    offer_hash: 'auwxp'
+    sigilo_id: 'cmwa1bj6q12wz01pzbi4atzcz'
   }
 };
 
 /**
- * Rota para verificar status de conexão com a IronPay
+ * Rota para verificar status de conexão com a SigiloPay
  */
 async function handleGatewayTest(req, res) {
-  if (!IRONPAY_API_TOKEN) {
+  if (!SIGILOPAY_PUBLIC_KEY || !SIGILOPAY_SECRET_KEY) {
     return res.json({
       connected: false,
-      gateway: 'ironpay',
+      gateway: 'sigilopay',
       mode: 'mock',
-      message: 'IRONPAY_API_TOKEN não configurado.'
+      message: 'Credenciais da SigiloPay não configuradas.'
     });
   }
 
   try {
-    const response = await fetch(`${IRONPAY_BASE_URL}/products?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
+    const response = await fetch(`${SIGILOPAY_BASE_URL}/gateway/producer/credentials`, {
       method: 'GET',
-      headers: { 'Accept': 'application/json' }
+      headers: {
+        'x-public-key': SIGILOPAY_PUBLIC_KEY,
+        'x-secret-key': SIGILOPAY_SECRET_KEY,
+        'Content-Type': 'application/json'
+      }
     });
 
     if (!response.ok) {
       const err = await response.text();
       return res.status(response.status).json({
         connected: false,
-        gateway: 'ironpay',
+        gateway: 'sigilopay',
         status: response.status,
         error: err
       });
@@ -83,25 +90,27 @@ async function handleGatewayTest(req, res) {
     const data = await response.json();
     return res.json({
       connected: true,
-      gateway: 'ironpay',
+      gateway: 'sigilopay',
       mode: 'live',
-      products_count: Array.isArray(data.data) ? data.data.length : 1,
+      account: data,
       catalog: CATALOG
     });
   } catch (err) {
     return res.status(500).json({
       connected: false,
-      gateway: 'ironpay',
+      gateway: 'sigilopay',
       error: err.message
     });
   }
 }
 
+app.get('/api/sigilopay/test', handleGatewayTest);
+app.get('/api/gateway/test', handleGatewayTest);
 app.get('/api/ironpay/test', handleGatewayTest);
 app.get('/api/bravopay/test', handleGatewayTest);
 
 /**
- * Criação da cobrança PIX via IronPay
+ * Criação da cobrança PIX via SigiloPay
  * Suporta o modelo de 3 metros (R$ 64,90) e o modelo de 5 metros (R$ 97,90)
  */
 app.post('/api/pix/create', async (req, res) => {
@@ -121,133 +130,93 @@ app.post('/api/pix/create', async (req, res) => {
     const cleanName = (customer.name || '').trim();
     const cleanEmail = (customer.email || '').trim().toLowerCase();
 
-    if (IRONPAY_API_TOKEN) {
+    if (SIGILOPAY_PUBLIC_KEY && SIGILOPAY_SECRET_KEY) {
+      const orderIdentifier = `lux_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const payload = {
-        amount: selectedProduct.amount_cents,
-        offer_hash: selectedProduct.offer_hash,
-        payment_method: 'pix',
-        installments: 1,
-        customer: {
+        identifier: orderIdentifier,
+        amount: Number(selectedProduct.price.toFixed(2)),
+        client: {
           name: cleanName,
           email: cleanEmail,
-          phone_number: cleanPhone,
-          document: cleanCpf,
-          street_name: customer.street_name || 'Rua Principal',
-          number: customer.number || '100',
-          complement: customer.complement || 'Casa',
-          neighborhood: customer.neighborhood || 'Centro',
-          city: customer.city || 'São Paulo',
-          state: customer.state || 'SP',
-          zip_code: (customer.zip_code || '01001000').replace(/\D/g, '')
+          phone: cleanPhone,
+          document: cleanCpf
         },
-        cart: [
+        products: [
           {
-            product_hash: selectedProduct.product_hash,
-            title: selectedProduct.name,
-            cover: null,
-            price: selectedProduct.amount_cents,
+            id: selectedProduct.sigilo_id || 'cmwa1bj6q12wz01pzbi4atzcz',
+            name: selectedProduct.name,
             quantity: 1,
-            operation_type: 1,
-            tangible: false
+            price: Number(selectedProduct.price.toFixed(2))
           }
         ],
-        expire_in_days: 1,
-        transaction_origin: 'api',
-        postback_url: WEBHOOK_URL
+        callbackUrl: WEBHOOK_URL
       };
 
-      if (tracking && typeof tracking === 'object') {
-        payload.tracking = {
-          src: String(tracking.src || ''),
-          utm_source: String(tracking.utm_source || ''),
-          utm_medium: String(tracking.utm_medium || ''),
-          utm_campaign: String(tracking.utm_campaign || ''),
-          utm_term: String(tracking.utm_term || ''),
-          utm_content: String(tracking.utm_content || '')
-        };
-      }
+      console.log(`[SigiloPay] Criando Pix para ${selectedProduct.name} - R$ ${selectedProduct.price.toFixed(2)}...`);
 
-      console.log(`[IronPay] Criando Pix para ${selectedProduct.name} (${selectedProduct.offer_hash}) - R$ ${selectedProduct.price.toFixed(2)}...`);
-
-      const response = await fetch(`${IRONPAY_BASE_URL}/transactions?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
+      const response = await fetch(`${SIGILOPAY_BASE_URL}/gateway/pix/receive`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'x-public-key': SIGILOPAY_PUBLIC_KEY,
+          'x-secret-key': SIGILOPAY_SECRET_KEY,
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
 
       if (!response.ok) {
         const errorBody = await response.text();
-        console.error('[IronPay] Erro ao criar transação:', response.status, errorBody);
+        console.error('[SigiloPay] Erro ao criar transação:', response.status, errorBody);
+
+        let parsedError;
+        try { parsedError = JSON.parse(errorBody); } catch (e) {}
+
+        const userMsg = (parsedError && parsedError.message) 
+          ? parsedError.message 
+          : 'Sistema de pagamentos em manutenção temporária. Tente novamente em instantes.';
+
         return res.status(response.status).json({
-          error: 'Falha ao gerar o Pix junto ao gateway IronPay.',
+          error: userMsg,
           details: errorBody
         });
       }
 
-      let tx = await response.json();
-      const txData = tx.data || tx;
-      const txHash = txData.hash || String(txData.id || '');
-      let pixObj = txData.pix || {};
-      let copyPaste = pixObj.pix_qr_code || pixObj.pix_url || pixObj.copy_paste || '';
+      const data = await response.json();
+      console.log('[SigiloPay] Transação criada com sucesso!', JSON.stringify(data));
 
-      console.log('[IronPay] Transação criada com sucesso! Hash:', txHash, 'Status:', txData.payment_status);
+      const txId = data.transactionId || (data.order && data.order.id) || orderIdentifier;
+      const pixObj = data.pix || {};
+      const copyPaste = pixObj.code || pixObj.qr_code || '';
+      let qrCodeBase64 = pixObj.base64 || '';
+      const qrCodeUrl = pixObj.image || pixObj.url || null;
 
-      // Caso o código Pix demore alguns segundos para ficar pronto, faz até 2 consultas rápidas
-      if (!copyPaste && txHash) {
-        for (let attempt = 1; attempt <= 2; attempt++) {
-          await new Promise(r => setTimeout(r, 1500));
-          try {
-            const pollRes = await fetch(`${IRONPAY_BASE_URL}/transactions/${encodeURIComponent(txHash)}?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
-              method: 'GET',
-              headers: { 'Accept': 'application/json' }
-            });
-            if (pollRes.ok) {
-              const pollTx = await pollRes.json();
-              const pData = pollTx.data || pollTx;
-              const pPix = pData.pix || {};
-              const pCode = pPix.pix_qr_code || pPix.pix_url || pPix.copy_paste || '';
-              if (pCode) {
-                copyPaste = pCode;
-                pixObj = pPix;
-                break;
-              }
-            }
-          } catch (e) {}
-        }
-      }
-
-      let qrCodeBase64 = '';
-      if (pixObj.qr_code_base64 && String(pixObj.qr_code_base64).startsWith('iVBOR')) {
-        qrCodeBase64 = pixObj.qr_code_base64;
-      } else if (copyPaste) {
+      if (!qrCodeBase64 && copyPaste) {
         const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
         qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
       }
 
-      localTransactions.set(txHash, {
-        id: txHash,
+      localTransactions.set(txId, {
+        id: txId,
+        identifier: orderIdentifier,
         status: 'pending',
-        amount_cents: selectedProduct.amount_cents,
+        amount: selectedProduct.price,
         product: selectedProduct,
         customer,
         createdAt: Date.now()
       });
 
       return res.json({
-        id: txHash,
+        id: txId,
         pix_status: copyPaste ? 'ready' : 'generating',
         qr_code: copyPaste,
         qr_code_base64: qrCodeBase64,
-        qr_code_url: null,
+        qr_code_url: qrCodeUrl,
         amount: selectedProduct.price,
         product: selectedProduct
       });
     }
 
-    // Modo de Simulação / Fallback local
+    // Modo de Simulação / Fallback
     const mockId = 'tx_mock_' + crypto.randomBytes(8).toString('hex');
     const mockCopyPaste = `00020126580014br.gov.bcb.pix0136${crypto.randomUUID()}520400005303986540${(selectedProduct.price).toFixed(2).replace('.', '')}5802BR5915CORTINA LED BR6009SAO PAULO62070503***6304MOCK`;
     const qrDataUrl = await QRCode.toDataURL(mockCopyPaste, { width: 300, margin: 2 });
@@ -256,7 +225,7 @@ app.post('/api/pix/create', async (req, res) => {
     localTransactions.set(mockId, {
       id: mockId,
       status: 'pending',
-      amount_cents: selectedProduct.amount_cents,
+      amount: selectedProduct.price,
       product: selectedProduct,
       customer,
       createdAt: Date.now()
@@ -279,7 +248,7 @@ app.post('/api/pix/create', async (req, res) => {
 });
 
 /**
- * Consulta de status do pagamento na IronPay
+ * Consulta de status do pagamento na SigiloPay
  */
 app.get('/api/pix/status', async (req, res) => {
   const { id } = req.query;
@@ -287,7 +256,7 @@ app.get('/api/pix/status', async (req, res) => {
 
   const local = localTransactions.get(id);
   if (local && local.status === 'paid') {
-    return res.json({ status: 'paid', raw: 'paid', pix_status: 'ready' });
+    return res.json({ status: 'paid', raw: 'COMPLETED', pix_status: 'ready' });
   }
 
   if (id.startsWith('tx_mock_')) {
@@ -297,35 +266,34 @@ app.get('/api/pix/status', async (req, res) => {
     return res.json({ status: local ? local.status : 'pending' });
   }
 
-  if (IRONPAY_API_TOKEN) {
+  if (SIGILOPAY_PUBLIC_KEY && SIGILOPAY_SECRET_KEY) {
     try {
-      const response = await fetch(`${IRONPAY_BASE_URL}/transactions/${encodeURIComponent(id)}?api_token=${encodeURIComponent(IRONPAY_API_TOKEN)}`, {
+      const response = await fetch(`${SIGILOPAY_BASE_URL}/gateway/transactions?id=${encodeURIComponent(id)}`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json' }
+        headers: {
+          'x-public-key': SIGILOPAY_PUBLIC_KEY,
+          'x-secret-key': SIGILOPAY_SECRET_KEY,
+          'Content-Type': 'application/json'
+        }
       });
 
       if (response.ok) {
         const tx = await response.json();
-        const txData = tx.data || tx;
-        const rawStatus = String(txData.payment_status || txData.status || '').toLowerCase();
+        const rawStatus = String(tx.status || '').toUpperCase();
         let status = 'pending';
 
-        if (['paid', 'approved', 'pad_approved'].includes(rawStatus)) {
+        if (rawStatus === 'COMPLETED' || rawStatus === 'PAID') {
           status = 'paid';
-        } else if (['expired', 'refused', 'cancelled', 'canceled', 'unpaid', 'failed'].includes(rawStatus)) {
+        } else if (rawStatus === 'FAILED' || rawStatus === 'CANCELED' || rawStatus === 'CANCELLED') {
           status = 'expired';
-        } else if (rawStatus === 'refunded') {
+        } else if (rawStatus === 'REFUNDED') {
           status = 'refunded';
-        } else if (rawStatus === 'chargeback') {
-          status = 'chargeback';
         }
 
-        const pixObj = txData.pix || {};
-        const copyPaste = pixObj.pix_qr_code || pixObj.pix_url || pixObj.copy_paste || '';
-        let qrCodeBase64 = '';
-        if (pixObj.qr_code_base64 && String(pixObj.qr_code_base64).startsWith('iVBOR')) {
-          qrCodeBase64 = pixObj.qr_code_base64;
-        } else if (copyPaste) {
+        const pixInfo = tx.pixInformation || tx.pix || {};
+        const copyPaste = pixInfo.qrCode || pixInfo.code || '';
+        let qrCodeBase64 = pixInfo.base64 || '';
+        if (!qrCodeBase64 && copyPaste) {
           const dataUrl = await QRCode.toDataURL(copyPaste, { width: 300, margin: 2 });
           qrCodeBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
         }
@@ -336,12 +304,11 @@ app.get('/api/pix/status', async (req, res) => {
           raw: rawStatus,
           pix_status: copyPaste ? 'ready' : 'generating',
           qr_code: copyPaste,
-          qr_code_base64: qrCodeBase64,
-          qr_code_url: null
+          qr_code_base64: qrCodeBase64
         });
       }
     } catch (err) {
-      console.error('[IronPay] Erro ao consultar transação:', err.message);
+      console.error('[SigiloPay] Erro ao consultar transação:', err.message);
     }
   }
 
@@ -349,31 +316,31 @@ app.get('/api/pix/status', async (req, res) => {
 });
 
 /**
- * Webhook IronPay
+ * Webhook SigiloPay
  * Recebe notificações instantâneas de pagamento confirmado
  */
 app.post('/api/pix/webhook', (req, res) => {
   try {
     const payload = req.body || {};
-    console.log('[IronPay Webhook] Recebido:', JSON.stringify(payload, null, 2));
+    console.log('[SigiloPay Webhook] Recebido:', JSON.stringify(payload, null, 2));
 
-    const txHash = payload.hash || payload.transaction_hash || (payload.data && payload.data.hash) || String(payload.id || '');
-    const rawStatus = String(
-      payload.payment_status ||
-      payload.status ||
-      (payload.data && (payload.data.payment_status || payload.data.status)) ||
-      ''
-    ).toLowerCase();
+    const event = String(payload.event || '').toUpperCase();
+    const tx = payload.transaction || {};
+    const txId = tx.id || payload.id;
+    const rawStatus = String(tx.status || payload.status || '').toUpperCase();
 
-    if (txHash && rawStatus) {
-      const local = localTransactions.get(txHash);
+    if (txId) {
+      const local = localTransactions.get(txId);
+      const isPaid = event === 'TRANSACTION_PAID' || rawStatus === 'COMPLETED' || rawStatus === 'PAID';
+      const isCanceled = event === 'TRANSACTION_CANCELED' || rawStatus === 'FAILED';
+
       if (local) {
-        if (['paid', 'approved', 'pad_approved'].includes(rawStatus)) local.status = 'paid';
-        else if (['expired', 'refused', 'cancelled', 'canceled', 'unpaid', 'failed'].includes(rawStatus)) local.status = 'expired';
+        if (isPaid) local.status = 'paid';
+        if (isCanceled) local.status = 'expired';
       } else {
-        localTransactions.set(txHash, {
-          id: txHash,
-          status: ['paid', 'approved', 'pad_approved'].includes(rawStatus) ? 'paid' : 'pending',
+        localTransactions.set(txId, {
+          id: txId,
+          status: isPaid ? 'paid' : 'pending',
           createdAt: Date.now()
         });
       }
@@ -381,15 +348,15 @@ app.post('/api/pix/webhook', (req, res) => {
 
     return res.status(200).json({ received: true });
   } catch (err) {
-    console.error('Erro no webhook IronPay:', err);
+    console.error('Erro no webhook SigiloPay:', err);
     return res.status(500).json({ error: 'Erro ao processar webhook' });
   }
 });
 
 app.listen(PORT, () => {
   console.log(`\n======================================================`);
-  console.log(`🚀 Servidor Cortina LED + IronPay Pix rodando na porta ${PORT}`);
+  console.log(`🚀 Servidor Cortina LED + SigiloPay Pix rodando na porta ${PORT}`);
   console.log(`🌐 Acesse no seu navegador: http://localhost:${PORT}`);
-  console.log(`✅ CONEXÃO COM IRONPAY ATIVA!`);
+  console.log(`✅ CONEXÃO COM SIGILOPAY ATIVA!`);
   console.log(`======================================================\n`);
 });
