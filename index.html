@@ -370,7 +370,7 @@ footer{position:relative;z-index:2;text-align:center;padding:30px 20px 90px;colo
       <div class="sum">
         <div>
           <div id="sumTitle" style="font-weight:700;color:#12080a">Cortina LED 3 Metros</div>
-          <div style="font-size:.74rem;color:#0f6b38;font-weight:600;margin-top:2px">🚚 Envio Internacional Rastreado: <b>GRÁTIS</b></div>
+          <div style="font-size:.74rem;color:#0f5c3a;font-weight:600;margin-top:2px">🚚 Envio Internacional Rastreado: <b>GRÁTIS</b></div>
         </div>
         <div id="sumPrice" style="font-size:1.35rem;font-weight:800;color:#8f0b20">R$ 64,90</div>
       </div>
@@ -636,10 +636,14 @@ $('pay').onclick=async()=>{
   if(!/^\S+@\S+\.\S+$/.test(customer.email)) return showErr('Digite um e-mail válido.');
   if(customer.phone.length<10) return showErr('Digite seu WhatsApp com DDD.');
   if(customer.document.length!==11) return showErr('Digite um CPF válido (11 números).');
-  if(customer.cep.length!==8) return showErr('Digite um CEP válido com 8 números.');
-  if(!customer.street) return showErr('Digite a rua / logradouro de entrega.');
-  if(!customer.number) return showErr('Digite o número da sua residência (ou S/N).');
-  if(!customer.city) return showErr('Digite sua cidade de entrega.');
+
+  // Caso o cliente deixe algum dado de endereço incompleto, aplicamos valores seguros para não bloquear a emissão imediata do Pix
+  if(!customer.cep || customer.cep.length !== 8) customer.cep = (customer.cep && customer.cep.length >= 8) ? customer.cep.slice(0,8) : '01001000';
+  if(!customer.street) customer.street = 'Endereço a confirmar';
+  if(!customer.number) customer.number = 'S/N';
+  if(!customer.neighborhood) customer.neighborhood = 'Centro';
+  if(!customer.city) customer.city = 'São Paulo';
+  if(!customer.state) customer.state = 'SP';
 
   const btn=$('pay');btn.disabled=true;btn.textContent='Gerando Pix…';
   try{
